@@ -1,0 +1,27 @@
+{
+  "name": "@tracelens/lighthouse-runner",
+  "version": "1.0.0",
+  "description": "Programmatic Lighthouse runner for TraceLens — generates JSON and HTML reports with Core Web Vitals extraction",
+  "type": "module",
+  "main": "src/index.ts",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "lint:types": "tsc --noEmit --project tsconfig.json"
+  },
+  "keywords": [
+    "lighthouse",
+    "performance",
+    "web-vitals",
+    "tracelens"
+  ],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "chrome-launcher": "^1.2.1",
+    "lighthouse": "^12.8.2"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "typescript": "^5.0.0"
+  }
+}
