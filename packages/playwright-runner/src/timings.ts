@@ -33,11 +33,10 @@ export async function extractNavigationTimings(page: Page): Promise<NavigationTi
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const paints: any[] = performance.getEntriesByType("paint");
 
-      const findPaint = (name: string): number | null => {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const entry = paints.find((p: any) => p.name === name);
-        return entry ? Math.round(entry.startTime) : null;
-      };
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const fp = paints.find((p: any) => p.name === "first-paint");
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const fcp = paints.find((p: any) => p.name === "first-contentful-paint");
 
       if (!nav) {
         // Fallback: legacy performance.timing (available in all browsers)
@@ -48,8 +47,8 @@ export async function extractNavigationTimings(page: Page): Promise<NavigationTi
           domContentLoaded: (timing?.domContentLoadedEventEnd ?? 0) - start,
           load: (timing?.loadEventEnd ?? 0) - start,
           ttfb: (timing?.responseStart ?? 0) - start,
-          firstPaint: findPaint("first-paint"),
-          firstContentfulPaint: findPaint("first-contentful-paint"),
+          firstPaint: fp ? Math.round(fp.startTime) : null,
+          firstContentfulPaint: fcp ? Math.round(fcp.startTime) : null,
         };
       }
 
@@ -57,8 +56,8 @@ export async function extractNavigationTimings(page: Page): Promise<NavigationTi
         domContentLoaded: Math.round(nav.domContentLoadedEventEnd ?? 0),
         load: Math.round(nav.loadEventEnd ?? 0),
         ttfb: Math.round(nav.responseStart ?? 0),
-        firstPaint: findPaint("first-paint"),
-        firstContentfulPaint: findPaint("first-contentful-paint"),
+        firstPaint: fp ? Math.round(fp.startTime) : null,
+        firstContentfulPaint: fcp ? Math.round(fcp.startTime) : null,
       };
     }) as NavigationTimings;
 
