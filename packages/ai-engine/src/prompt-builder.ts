@@ -36,10 +36,14 @@ YOUR ROLE:
 STRICT RULES:
 - Do NOT invent bottlenecks. Only explain what the data shows.
 - Do NOT give generic advice ("optimize JavaScript"). Be specific.
-- Reference actual numbers from the input data.
+- Reference actual numbers from the input data (ms, KB, script names).
+- When attributedScripts are provided, NAME THEM in your analysis.
+- When framework is detected, make recommendations framework-specific.
+- When impactEstimate is provided, reference those projected gains.
 - Focus ONLY on frontend rendering performance.
 - Ignore backend, database, and infrastructure concerns.
 - Keep explanations concise and developer-focused.
+- If confidence is below 70%, clearly state the uncertainty.
 
 OUTPUT FORMAT:
 Respond with ONLY valid JSON matching this exact schema:
@@ -111,7 +115,7 @@ export function buildUserPrompt(report: TraceLensIntelligenceReport): string {
   if (v.ttfb.value !== null) vitals.ttfb = `${v.ttfb.value}ms [${v.ttfb.rating}]`;
   if (v.performanceScore !== null) vitals.score = `${v.performanceScore}/100`;
 
-  // Top 5 performance risks (pre-correlated by analytics engine)
+  // Top 5 performance risks with attribution and impact estimates
   const topRisks = performanceRisks.slice(0, 5).map((r) => ({
     type: r.type,
     label: r.label,
@@ -120,6 +124,18 @@ export function buildUserPrompt(report: TraceLensIntelligenceReport): string {
     impact: r.impact,
     recommendation: r.recommendation,
     sources: r.sources.join(", "),
+    ...(r.attributionMetadata?.attributedScripts?.length ? {
+      attributedScripts: r.attributionMetadata.attributedScripts.slice(0, 3)
+        .map((s) => s.split("/").pop() ?? s),
+    } : {}),
+    ...(r.impactEstimate ? {
+      estimatedGain: {
+        ...(r.impactEstimate.lcpMs ? { lcpMs: `~${r.impactEstimate.lcpMs}ms` } : {}),
+        ...(r.impactEstimate.tbtMs ? { tbtMs: `~${r.impactEstimate.tbtMs}ms` } : {}),
+        ...(r.impactEstimate.fcpMs ? { fcpMs: `~${r.impactEstimate.fcpMs}ms` } : {}),
+        ...(r.impactEstimate.scorePoints ? { score: `~${r.impactEstimate.scorePoints} pts` } : {}),
+      }
+    } : {}),
   }));
 
   // Top 5 scripting bottlenecks
@@ -136,13 +152,16 @@ export function buildUserPrompt(report: TraceLensIntelligenceReport): string {
     blockingMs: r.blockingMs,
   }));
 
-  // Compact hydration signals
+  // Compact hydration signals with confidence
   const hydrationSignals = {
     largeInitialJS: hydration.largeInitialJS,
     jsBeforeFcpMs: hydration.jsBeforeFcpMs,
     hydrationDetected: hydration.detected,
     hydrationDurationMs: hydration.durationMs,
+    confidence: hydration.confidence !== undefined ? Math.round(hydration.confidence * 100) + "%" : "unknown",
+    detectionMethod: hydration.detectionMethod,
     severity: hydration.severity,
+    note: hydration.confidenceNote,
   };
 
   // Compact bundle summary
@@ -170,12 +189,31 @@ export function buildUserPrompt(report: TraceLensIntelligenceReport): string {
     longestTaskMs: mainThread.longestTaskMs,
   };
 
+  // Top 3 long tasks with LCP overlap and attributed scripts
+  const topLongTasksWithAttribution = mainThread.topLongTasks.slice(0, 3).map((t) => ({
+    durationMs: t.durationMs,
+    attribution: t.attribution,
+    lcpOverlap: t.lcpOverlap ?? false,
+    ...(t.attributedScripts?.length ? {
+      attributedScripts: t.attributedScripts.slice(0, 2).map((s) => s.split("/").pop() ?? s),
+    } : t.script ? { primaryScript: t.script.split("/").pop() ?? t.script } : {}),
+  }));
+
+  // Framework detection
+  const frameworkInfo = report.framework?.framework ? {
+    framework: report.framework.framework,
+    confidence: Math.round((report.framework.confidence ?? 0) * 100) + "%",
+    detectionMethods: report.framework.detectionMethods,
+  } : null;
+
   const payload = {
     url: session.url,
     device: session.device,
     throttle: session.throttle,
+    framework: frameworkInfo,
     vitals,
     mainThread: mainThreadSummary,
+    topLongTasks: topLongTasksWithAttribution.length > 0 ? topLongTasksWithAttribution : undefined,
     primaryBottleneck,
     hydration: hydrationSignals,
     topRisks,

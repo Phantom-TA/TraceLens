@@ -162,6 +162,12 @@ export interface RendererThread {
 export interface LongTask {
   /** Primary script URL attributed to this task (if any) */
   script: string | null;
+  /** ALL script URLs that contributed to this task (multi-attribution) */
+  attributedScripts: string[];
+  /** Attribution confidence: 1.0 = script URL found, 0.5 = inferred from task type */
+  attributionConfidence: number;
+  /** Whether this long task overlapped with the LCP render window */
+  lcpOverlap: boolean;
   /** Task duration in ms */
   duration: number;
   /** Task start time relative to navigationStart (ms) */
@@ -214,8 +220,8 @@ export interface RenderBlockingResource {
 export interface HydrationSignal {
   /** Whether hydration was detected at all */
   detected: boolean;
-  /** Estimated framework */
-  framework: "react" | "next.js" | "vue" | "angular" | "unknown" | null;
+  /** Detected framework (primary + secondary signals combined) */
+  framework: "react" | "next.js" | "vue" | "nuxt" | "angular" | "astro" | "remix" | "svelte" | "sveltekit" | "unknown" | null;
   /** Hydration start time relative to navigationStart (ms) */
   startTime: number | null;
   /** Hydration end time relative to navigationStart (ms) */
@@ -224,6 +230,12 @@ export interface HydrationSignal {
   durationMs: number | null;
   /** Time from FCP to hydration complete (ms) — the "interaction gap" */
   fcpToHydrationMs: number | null;
+  /** Confidence score 0–1: how certain we are this is a real hydration signal */
+  confidence: number;
+  /** How the hydration was detected */
+  detectionMethod: "user-timing" | "bundle-signature" | "post-fcp-scripting" | "lhr-bootup" | "inferred";
+  /** Human-readable note explaining confidence level */
+  confidenceNote: string | null;
 }
 
 /** JS scripting bottleneck summary per script URL */
@@ -300,6 +312,25 @@ export interface CorrelationInsights {
   explanation: string;
 }
 
+// ─── Framework Detection ──────────────────────────────────────────────────────
+
+/**
+ * Result from the multi-signal framework detection engine.
+ * Combines trace-parser runtime signals (primary) with LHR script signatures (secondary).
+ */
+export interface FrameworkDetectionResult {
+  /** Detected framework (null if none detected) */
+  framework: "react" | "next.js" | "vue" | "nuxt" | "angular" | "astro" | "remix" | "svelte" | "sveltekit" | "unknown" | null;
+  /** Combined confidence score 0–1 */
+  confidence: number;
+  /** Which detection methods fired */
+  detectionMethods: Array<"trace-user-timing" | "trace-scripting" | "lhr-bootup" | "script-url-signature" | "post-fcp-heuristic">;
+  /** Human-readable explanation */
+  confidenceNote: string | null;
+  /** Detected framework version string if available */
+  runtimeVersion: string | null;
+}
+
 export type BottleneckCategory =
   | "render-blocking-resources"
   | "long-tasks"
@@ -362,7 +393,7 @@ export interface ParsedTraceBottlenecks {
    */
   renderBlockingResources: RenderBlockingResource[];
 
-  /** Hydration delay analysis */
+  /** Hydration delay analysis with confidence scoring */
   hydration: HydrationSignal;
 
   /**
@@ -379,6 +410,12 @@ export interface ParsedTraceBottlenecks {
 
   /** Cross-signal correlation and primary bottleneck diagnosis */
   correlations: CorrelationInsights;
+
+  /**
+   * Multi-signal framework detection result.
+   * Primary: trace runtime signals. Secondary: LHR script URL signatures.
+   */
+  frameworkDetection: FrameworkDetectionResult;
 
   /**
    * Structured signal list for AI prompt injection.

@@ -32,7 +32,7 @@ import {
 import { deduplicateAndRankSignals, assessDataQuality } from "./deduplicator.js";
 import { generateQuickWins } from "./quick-wins.js";
 
-const ENGINE_VERSION = "1.0.0";
+const ENGINE_VERSION = "2.0.0";
 
 /**
  * Aggregate all pipeline intelligence into one canonical normalized report.
@@ -70,7 +70,7 @@ export function aggregate(input: AggregatorInput): TraceLensIntelligenceReport {
   const primaryBottleneck = resolvePrimaryBottleneck(bottlenecks, bundle, performanceRisks);
 
   // ── Stage 6: Generate quick wins ──────────────────────────────────────────
-  const quickWins = generateQuickWins(bottlenecks, bundle, vitals);
+  const quickWins = generateQuickWins(bottlenecks, bundle, vitals, bottlenecks?.frameworkDetection);
 
   // ── Stage 7: Deduplicate + rank AI signals ────────────────────────────────
   // Inject correlation-derived signals first (highest priority)
@@ -115,12 +115,14 @@ export function aggregate(input: AggregatorInput): TraceLensIntelligenceReport {
     renderBlockingResources,
     lcpCandidate,
     hydration,
+    framework: bottlenecks?.frameworkDetection ?? null,
     bundle: normalizedBundle,
     performanceRisks,
     primaryBottleneck,
     quickWins,
     aiSignals,
     dataQuality,
+    stabilityMetrics: null,
   };
 
   return report;
