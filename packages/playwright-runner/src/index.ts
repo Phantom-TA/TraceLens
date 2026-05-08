@@ -11,7 +11,7 @@
 
 // ─── Primary Entry Point ───────────────────────────────────────────────────────
 
-export { run } from "./runner";
+export { run } from "./runner.js";
 
 // ─── Types (Public Contract) ───────────────────────────────────────────────────
 
@@ -35,12 +35,12 @@ export type {
   // Internal (exposed for downstream package use)
   DeviceProfile,
   ResolvedRunnerConfig,
-} from "./types";
+} from "./types.js";
 
 // ─── Utilities (Re-exported for CLI and API use) ───────────────────────────────
 
-export { DEVICE_PROFILES, THROTTLE_CONDITIONS, resolveConfig, resolveDeviceProfile } from "./config";
-export { slugifyRoute } from "./output-manager";
-export { captureElementScreenshot, captureScreenshot } from "./screenshot";
-export { isTracingEnabled } from "./trace-capture";
-export { extractNavigationTimings, waitForPageStability } from "./timings";
+export { DEVICE_PROFILES, THROTTLE_CONDITIONS, resolveConfig, resolveDeviceProfile } from "./config.js";
+export { slugifyRoute } from "./output-manager.js";
+export { captureElementScreenshot, captureScreenshot } from "./screenshot.js";
+export { isTracingEnabled } from "./trace-capture.js";
+export { extractNavigationTimings, waitForPageStability } from "./timings.js";

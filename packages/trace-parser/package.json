@@ -1,0 +1,17 @@
+{
+  "name": "@tracelens/trace-parser",
+  "version": "1.0.0",
+  "description": "Chrome trace and Lighthouse LHR parser that extracts compact, AI-ready frontend performance bottleneck summaries",
+  "type": "module",
+  "main": "src/index.ts",
+  "scripts": {
+    "typecheck": "tsc --noEmit --project tsconfig.json"
+  },
+  "keywords": ["lighthouse", "chrome-trace", "performance", "core-web-vitals", "tracelens"],
+  "author": "",
+  "license": "ISC",
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "typescript": "^5.0.0"
+  }
+}

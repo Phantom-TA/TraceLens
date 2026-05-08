@@ -25,18 +25,18 @@ import {
   createContext,
   createPage,
   launchBrowser,
-} from "./browser";
-import { resolveConfig } from "./config";
+} from "./browser.js";
+import { resolveConfig } from "./config.js";
 import {
   initRouteDir,
   initSessionDir,
   resolveArtifactPaths,
   slugifyRoute,
   writeJson,
-} from "./output-manager";
-import { captureScreenshot } from "./screenshot";
-import { startTrace, stopTrace } from "./trace-capture";
-import { extractNavigationTimings, waitForPageStability } from "./timings";
+} from "./output-manager.js";
+import { captureScreenshot } from "./screenshot.js";
+import { startTrace, stopTrace } from "./trace-capture.js";
+import { extractNavigationTimings, waitForPageStability } from "./timings.js";
 import type {
   DeviceProfile,
   ResolvedRunnerConfig,
@@ -45,7 +45,7 @@ import type {
   RouteResult,
   RunnerConfig,
   RunnerResult,
-} from "./types";
+} from "./types.js";
 
 // ─── Session ID ────────────────────────────────────────────────────────────────
 

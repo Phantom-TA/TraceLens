@@ -9,7 +9,7 @@
  */
 
 import { Page } from "playwright";
-import type { NavigationTimings } from "./types";
+import type { NavigationTimings } from "./types.js";
 
 // ─── Extractor ─────────────────────────────────────────────────────────────────
 

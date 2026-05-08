@@ -8,7 +8,7 @@ const index_js_1 = require("./packages/lighthouse-runner/src/index.js");
 async function main() {
     const result = await (0, index_js_1.run)({
         routes: [
-            { url: 'https://example.com' }
+            { url: 'https://www.cnn.com' }
         ],
         preset: 'desktop',
         formats: ['json', 'html'],

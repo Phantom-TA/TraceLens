@@ -1,0 +1,17 @@
+{
+  "name": "@tracelens/bundle-analyzer",
+  "version": "1.0.0",
+  "description": "JavaScript bundle intelligence module for TraceLens — detects oversized dependencies, duplicates, and performance bottlenecks from webpack stats and source maps",
+  "type": "module",
+  "main": "src/index.ts",
+  "scripts": {
+    "typecheck": "tsc --noEmit --project tsconfig.json"
+  },
+  "keywords": ["webpack", "bundle-analysis", "performance", "core-web-vitals", "tracelens"],
+  "author": "",
+  "license": "ISC",
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "typescript": "^5.0.0"
+  }
+}
