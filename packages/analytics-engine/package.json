@@ -1,0 +1,17 @@
+{
+  "name": "@tracelens/analytics-engine",
+  "version": "1.0.0",
+  "description": "TraceLens Analytics Aggregation Engine — normalizes and correlates all performance intelligence",
+  "type": "module",
+  "main": "src/index.ts",
+  "scripts": {
+    "typecheck": "tsc --noEmit --project tsconfig.json"
+  },
+  "keywords": ["analytics", "performance", "tracelens", "intelligence"],
+  "author": "",
+  "license": "ISC",
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "typescript": "^5.0.0"
+  }
+}
