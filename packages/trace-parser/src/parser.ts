@@ -70,6 +70,7 @@ import {
 
 import { correlateSignals } from "./correlator.js";
 import { buildAISignals } from "./summarizer.js";
+import { detectFramework, detectFrameworkFromLHR } from "./extractors/framework-detector.js";
 
 // ─── Public API ────────────────────────────────────────────────────────────────
 
@@ -141,7 +142,7 @@ export function parse(input: ParseInput): ParsedTraceBottlenecks {
   const filteredEvents = filterEvents(rawEvents, renderer);
 
   // ── Step 5a: Long tasks + main thread ──────────────────────────────────────
-  const longTasks = extractLongTasks(filteredEvents, renderer);
+  const longTasks = extractLongTasks(filteredEvents, renderer, vitals.lcp);
   const mainThread = computeMainThreadSummary(filteredEvents, renderer, longTasks);
 
   // Build set of script URLs that caused long tasks (for scripting correlation)
@@ -170,6 +171,9 @@ export function parse(input: ParseInput): ParsedTraceBottlenecks {
   const rendering = extractRenderingTimeline(filteredEvents, renderer);
   const bundleSignals = computeBundleSignals(filteredEvents, renderer, fcpMs, scriptingBottlenecks);
 
+  // ── Step 5f: Framework detection ─────────────────────────────────────────
+  const frameworkDetection = detectFramework(filteredEvents, renderer, fcpMs, lhr);
+
   // ── Step 6: Correlate ──────────────────────────────────────────────────────
   const correlations = correlateSignals(
     lcpCandidate,
@@ -193,6 +197,7 @@ export function parse(input: ParseInput): ParsedTraceBottlenecks {
     rendering,
     bundle: bundleSignals,
     correlations,
+    frameworkDetection,
   });
 
   return {
@@ -209,6 +214,7 @@ export function parse(input: ParseInput): ParsedTraceBottlenecks {
     rendering,
     bundleSignals,
     correlations,
+    frameworkDetection,
     aiSignals,
   };
 }
@@ -243,8 +249,8 @@ function parseLHROnly(
   };
 
   // Estimate long tasks from TBT (rough approximation)
-  const longTasks = tbt > 50
-    ? [{ script: null, duration: tbt, startTime: vitals.fcp ?? 0, attribution: "scripting" as const, breakdown: { scripting: tbt } }]
+  const longTasks = vitals.tbt !== null && vitals.tbt > 50
+    ? [{ script: null, attributedScripts: [] as string[], attributionConfidence: 0.5, lcpOverlap: false, duration: vitals.tbt, startTime: vitals.fcp ?? 0, attribution: "scripting" as const, breakdown: { scripting: vitals.tbt } }]
     : [];
 
   const bundleSignals = {
@@ -274,6 +280,9 @@ function parseLHROnly(
     vitals.ttfb
   );
 
+  // LHR-only framework detection
+  const frameworkDetection = detectFrameworkFromLHR(lhr);
+
   const aiSignals = buildAISignals({
     vitals,
     mainThread,
@@ -285,6 +294,7 @@ function parseLHROnly(
     rendering,
     bundle: bundleSignals,
     correlations,
+    frameworkDetection,
   });
 
   return {
@@ -301,6 +311,7 @@ function parseLHROnly(
     rendering,
     bundleSignals,
     correlations,
+    frameworkDetection,
     aiSignals,
   };
 }

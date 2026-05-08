@@ -134,10 +134,12 @@ export function normalizeMainThread(
     .slice(0, 5)
     .map((t) => ({
       script: t.script,
+      attributedScripts: t.attributedScripts ?? [],
       durationMs: t.duration,
       startTimeMs: t.startTime,
       attribution: t.attribution,
       severity: severityFromDuration(t.duration),
+      lcpOverlap: t.lcpOverlap ?? false,
     }));
 
   return {
@@ -227,6 +229,9 @@ export function normalizeHydration(
       largeInitialJS: false,
       jsBeforeFcpMs: 0,
       severity: "low",
+      confidence: 0,
+      detectionMethod: null,
+      confidenceNote: null,
     };
   }
 
@@ -250,5 +255,8 @@ export function normalizeHydration(
     largeInitialJS: bs.largeInitialJS,
     jsBeforeFcpMs,
     severity,
+    confidence: h.confidence ?? 0,
+    detectionMethod: h.detectionMethod ?? null,
+    confidenceNote: h.confidenceNote ?? null,
   };
 }

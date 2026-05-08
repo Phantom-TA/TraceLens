@@ -36,11 +36,13 @@ const MAX_LONG_TASKS = 10;
  *
  * @param events    - Pre-filtered events (main thread only)
  * @param renderer  - Renderer thread identity with navigationStart
+ * @param lcpMs     - LCP time in ms (optional) — used to flag lcpOverlap
  * @returns         - Array of LongTask, sorted by duration desc, capped at MAX_LONG_TASKS
  */
 export function extractLongTasks(
   events: RawTraceEvent[],
-  renderer: RendererThread
+  renderer: RendererThread,
+  lcpMs?: number | null
 ): LongTask[] {
   const { navigationStart } = renderer;
 
@@ -80,8 +82,9 @@ export function extractLongTasks(
         ev.ts + (ev.dur ?? 0) <= taskEnd + 1000 // +1ms tolerance
     );
 
-    // Build category breakdown
+    // Build category breakdown + collect ALL contributing script URLs
     const breakdown: Record<string, number> = {};
+    const scriptUrlSet = new Set<string>();
     let topScriptUrl: string | null = null;
     let longestScriptDur = 0;
 
@@ -90,28 +93,46 @@ export function extractLongTasks(
       const dur = durToMs(child.dur ?? 0);
       breakdown[cat] = (breakdown[cat] ?? 0) + dur;
 
-      // Track the longest EvaluateScript to attribute the task
       if (
-        (child.name === "EvaluateScript" || child.name === "FunctionCall") &&
-        (child.dur ?? 0) > longestScriptDur
+        (child.name === "EvaluateScript" || child.name === "FunctionCall" || child.name === "v8.execute") &&
+        (child.dur ?? 0) > 5_000 // >5ms threshold
       ) {
-        longestScriptDur = child.dur ?? 0;
         const url = extractScriptUrl(child);
-        if (url) topScriptUrl = url;
+        if (url) {
+          scriptUrlSet.add(url);
+          // Track the longest evaluation as the primary attribution
+          if ((child.dur ?? 0) > longestScriptDur) {
+            longestScriptDur = child.dur ?? 0;
+            topScriptUrl = url;
+          }
+        }
       }
     }
 
-    // If no child events found, the task itself may be the attribution unit
+    // If no child events found, try the task event itself
     if (Object.keys(breakdown).length === 0) {
       const selfCat = classifyEventCategory(taskEv);
       breakdown[selfCat] = durationMs;
-      if (!topScriptUrl) topScriptUrl = extractScriptUrl(taskEv);
+      const selfUrl = extractScriptUrl(taskEv);
+      if (selfUrl) { topScriptUrl = selfUrl; scriptUrlSet.add(selfUrl); }
     }
 
     const attribution = dominantCategory(breakdown);
+    const attributedScripts = Array.from(scriptUrlSet);
+
+    // Attribution confidence: 1.0 if we have a URL, 0.5 if inferred from task type
+    const attributionConfidence = attributedScripts.length > 0 ? 1.0 : 0.5;
+
+    // lcpOverlap: task overlaps with or immediately precedes LCP render window
+    const lcpOverlap = lcpMs !== null && lcpMs !== undefined
+      ? (startMs <= lcpMs && startMs + durationMs >= lcpMs - 200)
+      : false;
 
     return {
       script: topScriptUrl,
+      attributedScripts,
+      attributionConfidence,
+      lcpOverlap,
       duration: durationMs,
       startTime: startMs,
       attribution,
@@ -131,14 +152,14 @@ export function extractLongTasks(
  */
 function extractLongTasksFromBEPairs(
   events: RawTraceEvent[],
-  renderer: RendererThread
+  renderer: RendererThread,
+  lcpMs?: number | null
 ): LongTask[] {
   const { navigationStart } = renderer;
   const mainEvents = events.filter(
     (ev) => ev.pid === renderer.pid && ev.tid === renderer.tid
   );
 
-  // Find all EvaluateScript X-events > 50ms (each is its own long task segment)
   const longScripts = mainEvents.filter(
     (ev) =>
       ev.ph === "X" &&
@@ -147,13 +168,24 @@ function extractLongTasksFromBEPairs(
   );
 
   return longScripts
-    .map((ev) => ({
-      script: extractScriptUrl(ev),
-      duration: durToMs(ev.dur ?? 0),
-      startTime: tsToMs(ev.ts, navigationStart),
-      attribution: "scripting" as LongTaskAttribution,
-      breakdown: { scripting: durToMs(ev.dur ?? 0) },
-    }))
+    .map((ev) => {
+      const url = extractScriptUrl(ev);
+      const startMs = tsToMs(ev.ts, navigationStart);
+      const durationMs = durToMs(ev.dur ?? 0);
+      const lcpOverlap = lcpMs !== null && lcpMs !== undefined
+        ? (startMs <= lcpMs && startMs + durationMs >= lcpMs - 200)
+        : false;
+      return {
+        script: url,
+        attributedScripts: url ? [url] : [],
+        attributionConfidence: url ? 1.0 : 0.5,
+        lcpOverlap,
+        duration: durationMs,
+        startTime: startMs,
+        attribution: "scripting" as LongTaskAttribution,
+        breakdown: { scripting: durationMs },
+      };
+    })
     .sort((a, b) => b.duration - a.duration)
     .slice(0, MAX_LONG_TASKS);
 }

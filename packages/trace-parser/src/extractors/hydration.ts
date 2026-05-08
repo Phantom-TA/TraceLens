@@ -1,9 +1,19 @@
 /**
  * @file extractors/hydration.ts
- * @description React / Next.js hydration delay detection.
+ * @description Framework hydration delay detection with confidence scoring.
  *
- * Detects framework hydration via User Timing marks and post-FCP scripting.
- * The "interaction gap" = time from FCP to end of hydration.
+ * DETECTION STRATEGY:
+ *   1. UserTiming marks (highest confidence — intentional instrumentation)
+ *   2. LHR bootup-time framework script analysis
+ *   3. Post-FCP large EvaluateScript heuristic (inferred)
+ *
+ * CONFIDENCE MODEL:
+ *   user-timing:        0.90 (very high — explicit framework instrumentation)
+ *   lhr-bootup:         0.65 (moderate — URL-based inference)
+ *   post-fcp-scripting: 0.45 (low — behavioral inference only)
+ *   inferred:           0.30 (very low — circumstantial evidence only)
+ *
+ * IMPORTANT: All detections are probabilistic. Never claim certainty.
  */
 
 import type {
@@ -14,11 +24,37 @@ import type {
 } from "../types.js";
 import { durToMs, tsToMs } from "../filters.js";
 
-const REACT_MARKS = ["ReactDOMHydrate", "ReactMount", "react::hydrate", "React Hydration"];
-const NEXTJS_MARKS = ["Next.js-hydration", "nextjs-hydration", "__next_router", "NextRouter.change"];
-const VUE_MARKS = ["vue-component-mount", "vue-renderer"];
+// ─── Framework UserTiming Marks ───────────────────────────────────────────────
+
+const REACT_MARKS = ["ReactDOMHydrate", "ReactMount", "react::hydrate", "React Hydration", "ReactDOMRender"];
+const NEXTJS_MARKS = ["Next.js-hydration", "nextjs-hydration", "__next_router", "NextRouter.change", "nextjs:"];
+const VUE_MARKS = ["vue-component-mount", "vue-renderer", "Vue.mount", "vue:"];
+const NUXT_MARKS = ["nuxt:hydrate", "nuxt-app", "nuxt.hydration"];
+const ANGULAR_MARKS = ["Angular", "ng-component", "AngularBootstrap", "angular:"];
+const ASTRO_MARKS = ["@astrojs", "astro:hydration", "astro-island", "astro:"];
+const REMIX_MARKS = ["__remix", "RemixBrowser", "remix-browser"];
+const SVELTEKIT_MARKS = ["sveltekit:start", "sveltekit:navigation", "__sveltekit"];
+const SVELTE_MARKS = ["svelte-component", "svelte.mount", "svelte:"];
 
 type FrameworkType = HydrationSignal["framework"];
+
+// ─── No-Hydration Sentinel ────────────────────────────────────────────────────
+
+function noHydration(): HydrationSignal {
+  return {
+    detected: false,
+    framework: null,
+    startTime: null,
+    endTime: null,
+    durationMs: null,
+    fcpToHydrationMs: null,
+    confidence: 0,
+    detectionMethod: "inferred",
+    confidenceNote: null,
+  };
+}
+
+// ─── Main Detection Entry Point ───────────────────────────────────────────────
 
 export function detectHydration(
   events: RawTraceEvent[],
@@ -33,15 +69,25 @@ export function detectHydration(
       (ev.cat?.includes("blink.user_timing") || ev.cat?.includes("blink,user_timing"))
   );
 
-  const reactResult = detectFrameworkHydration(userTimingEvents, REACT_MARKS, navigationStart, "react");
-  if (reactResult) return enrichWithFcp(reactResult, fcpMs);
+  // Try each framework via UserTiming marks (highest confidence)
+  const frameworkChecks: [string[], NonNullable<FrameworkType>][] = [
+    [NEXTJS_MARKS, "next.js"],
+    [REACT_MARKS, "react"],
+    [NUXT_MARKS, "nuxt"],
+    [VUE_MARKS, "vue"],
+    [ANGULAR_MARKS, "angular"],
+    [ASTRO_MARKS, "astro"],
+    [REMIX_MARKS, "remix"],
+    [SVELTEKIT_MARKS, "sveltekit"],
+    [SVELTE_MARKS, "svelte"],
+  ];
 
-  const nextResult = detectFrameworkHydration(userTimingEvents, NEXTJS_MARKS, navigationStart, "next.js");
-  if (nextResult) return enrichWithFcp(nextResult, fcpMs);
+  for (const [marks, framework] of frameworkChecks) {
+    const result = detectFromUserTimingMarks(userTimingEvents, marks, navigationStart, framework);
+    if (result) return enrichWithFcp(result, fcpMs);
+  }
 
-  const vueResult = detectFrameworkHydration(userTimingEvents, VUE_MARKS, navigationStart, "vue");
-  if (vueResult) return enrichWithFcp(vueResult, fcpMs);
-
+  // Generic hydration mark (any "hydrat" keyword)
   const genericHydration = userTimingEvents.find((ev) =>
     ev.name.toLowerCase().includes("hydrat")
   );
@@ -49,52 +95,109 @@ export function detectHydration(
     const startMs = tsToMs(genericHydration.ts, navigationStart);
     const durationMs = durToMs(genericHydration.dur ?? 0);
     return enrichWithFcp({
-      detected: true, framework: "unknown",
-      startTime: startMs, endTime: startMs + durationMs, durationMs, fcpToHydrationMs: null,
+      detected: true,
+      framework: "unknown",
+      startTime: startMs,
+      endTime: startMs + durationMs,
+      durationMs: Math.round(durationMs),
+      fcpToHydrationMs: null,
+      confidence: 0.75,
+      detectionMethod: "user-timing",
+      confidenceNote: `Generic hydration UserTiming mark detected: "${genericHydration.name}"`,
     }, fcpMs);
   }
 
+  // Post-FCP large script heuristic (behavioral inference)
   if (fcpMs !== null) {
-    const postFcpScript = findLargePostFcpScript(events, renderer, fcpMs, navigationStart);
-    if (postFcpScript) return enrichWithFcp(postFcpScript, fcpMs);
+    const postFcpResult = findLargePostFcpScript(events, renderer, fcpMs, navigationStart);
+    if (postFcpResult) return enrichWithFcp(postFcpResult, fcpMs);
   }
 
   return noHydration();
 }
+
+// ─── LHR-Only Detection ────────────────────────────────────────────────────────
 
 export function detectHydrationFromLHR(lhr: LighthouseLHRInput, fcpMs: number | null): HydrationSignal {
   if (!lhr.audits) return noHydration();
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const bootupItems: any[] = lhr.audits["bootup-time"]?.details?.items ?? [];
 
+  const frameworkUrlMap: [string[], NonNullable<FrameworkType>][] = [
+    [["/_next/", "_next/static"], "next.js"],
+    [["react-dom", "react.production", "react.development"], "react"],
+    [["/_nuxt/", "nuxt.js"], "nuxt"],
+    [["vue.runtime", "vue.esm", "/vue@"], "vue"],
+    [["@angular/", "angular.min"], "angular"],
+    [["/_astro/", "@astrojs/"], "astro"],
+    [["@remix-run/"], "remix"],
+    [["/.svelte-kit/", "@sveltejs/kit"], "sveltekit"],
+    [["svelte/internal", "svelte.js"], "svelte"],
+  ];
+
   for (const item of bootupItems) {
     const url: string = (item.url ?? "").toLowerCase();
-    const isFramework = ["react", "next", "vue", "angular", "svelte"].some((f) => url.includes(f));
-    if (!isFramework) continue;
     const scriptMs: number = item.scripting ?? item.total ?? 0;
-    if (scriptMs > 50 && fcpMs !== null) {
-      const fw = detectFrameworkFromUrl(url);
-      return { detected: true, framework: fw, startTime: fcpMs, endTime: fcpMs + scriptMs, durationMs: scriptMs, fcpToHydrationMs: scriptMs };
+    if (scriptMs < 50) continue;
+
+    for (const [patterns, framework] of frameworkUrlMap) {
+      if (patterns.some((p) => url.includes(p))) {
+        const note = `LHR bootup-time script "${item.url}" (${Math.round(scriptMs)}ms) matched ${framework} URL pattern`;
+        const result: HydrationSignal = {
+          detected: true,
+          framework,
+          startTime: fcpMs,
+          endTime: fcpMs !== null ? fcpMs + scriptMs : null,
+          durationMs: Math.round(scriptMs),
+          fcpToHydrationMs: Math.round(scriptMs),
+          confidence: 0.65,
+          detectionMethod: "lhr-bootup",
+          confidenceNote: note,
+        };
+        return result;
+      }
     }
   }
   return noHydration();
 }
 
-function detectFrameworkHydration(
-  events: RawTraceEvent[], marks: string[], navigationStart: number, framework: NonNullable<FrameworkType>
+// ─── Helpers ───────────────────────────────────────────────────────────────────
+
+function detectFromUserTimingMarks(
+  events: RawTraceEvent[],
+  marks: string[],
+  navigationStart: number,
+  framework: NonNullable<FrameworkType>
 ): HydrationSignal | null {
   let startTs = Infinity, endTs = -Infinity, found = false;
+  const matchedMarks: string[] = [];
+
   for (const ev of events) {
     if (!marks.some((m) => ev.name.toLowerCase().includes(m.toLowerCase()))) continue;
     found = true;
+    matchedMarks.push(ev.name);
     if (ev.ts < startTs) startTs = ev.ts;
     const evEnd = ev.ts + (ev.dur ?? 0);
     if (evEnd > endTs) endTs = evEnd;
   }
+
   if (!found) return null;
+
   const startMs = tsToMs(startTs, navigationStart);
   const endMs = tsToMs(endTs, navigationStart);
-  return { detected: true, framework, startTime: startMs, endTime: endMs, durationMs: Math.round(Math.max(0, endMs - startMs)), fcpToHydrationMs: null };
+  const durationMs = Math.round(Math.max(0, endMs - startMs));
+
+  return {
+    detected: true,
+    framework,
+    startTime: startMs,
+    endTime: endMs,
+    durationMs,
+    fcpToHydrationMs: null,
+    confidence: 0.90,
+    detectionMethod: "user-timing",
+    confidenceNote: `High confidence (90%) — ${framework} UserTiming marks detected: ${matchedMarks.slice(0, 2).join(", ")}`,
+  };
 }
 
 function enrichWithFcp(signal: HydrationSignal, fcpMs: number | null): HydrationSignal {
@@ -105,28 +208,40 @@ function enrichWithFcp(signal: HydrationSignal, fcpMs: number | null): Hydration
 }
 
 function findLargePostFcpScript(
-  events: RawTraceEvent[], renderer: RendererThread, fcpMs: number, navigationStart: number
+  events: RawTraceEvent[],
+  renderer: RendererThread,
+  fcpMs: number,
+  navigationStart: number
 ): HydrationSignal | null {
   const fcpTs = navigationStart + fcpMs * 1000;
+  // Look for large EvaluateScript events in the 3s window after FCP
   const candidates = events.filter(
-    (ev) => ev.pid === renderer.pid && ev.tid === renderer.tid && ev.ph === "X" &&
-      ev.name === "EvaluateScript" && ev.ts > fcpTs && (ev.dur ?? 0) > 200_000
+    (ev) =>
+      ev.pid === renderer.pid &&
+      ev.tid === renderer.tid &&
+      ev.ph === "X" &&
+      ev.name === "EvaluateScript" &&
+      ev.ts > fcpTs &&
+      ev.ts < fcpTs + 3_000_000 && // within 3s of FCP
+      (ev.dur ?? 0) > 100_000 // >100ms (lowered from 200ms for better coverage)
   );
+
   if (candidates.length === 0) return null;
+
   const largest = candidates.reduce((a, b) => ((b.dur ?? 0) > (a.dur ?? 0) ? b : a));
   const startMs = tsToMs(largest.ts, navigationStart);
-  const durationMs = durToMs(largest.dur ?? 0);
-  return { detected: true, framework: "unknown", startTime: startMs, endTime: startMs + durationMs, durationMs: Math.round(durationMs), fcpToHydrationMs: null };
-}
+  const durationMs = Math.round(durToMs(largest.dur ?? 0));
+  const totalPostFcpMs = Math.round(candidates.reduce((s, ev) => s + durToMs(ev.dur ?? 0), 0));
 
-function detectFrameworkFromUrl(url: string): FrameworkType {
-  if (url.includes("next")) return "next.js";
-  if (url.includes("react")) return "react";
-  if (url.includes("vue")) return "vue";
-  if (url.includes("angular")) return "angular";
-  return "unknown";
-}
-
-function noHydration(): HydrationSignal {
-  return { detected: false, framework: null, startTime: null, endTime: null, durationMs: null, fcpToHydrationMs: null };
+  return {
+    detected: true,
+    framework: "unknown",
+    startTime: startMs,
+    endTime: startMs + durationMs,
+    durationMs,
+    fcpToHydrationMs: null,
+    confidence: 0.45,
+    detectionMethod: "post-fcp-scripting",
+    confidenceNote: `Low-moderate confidence (45%) — ${candidates.length} large EvaluateScript event(s) detected after FCP (${totalPostFcpMs}ms total). Likely framework initialization or hydration.`,
+  };
 }

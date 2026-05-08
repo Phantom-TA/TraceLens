@@ -17,6 +17,7 @@
 
 import type { BundleAnalysisResult } from "../../bundle-analyzer/src/types.js";
 import type { ParsedTraceBottlenecks } from "../../trace-parser/src/types.js";
+import type { FrameworkDetectionResult } from "../../trace-parser/src/types.js";
 import type { QuickWin } from "./types.js";
 
 const MAX_QUICK_WINS = 7;
@@ -24,9 +25,21 @@ const MAX_QUICK_WINS = 7;
 export function generateQuickWins(
   bottlenecks: ParsedTraceBottlenecks | null,
   bundle: BundleAnalysisResult | null,
-  vitals: { fcp: number | null; tbt: number | null; lcp: number | null }
+  vitals: { fcp: number | null; tbt: number | null; lcp: number | null },
+  frameworkDetection?: FrameworkDetectionResult | null
 ): QuickWin[] {
   const wins: QuickWin[] = [];
+  const fw = frameworkDetection?.framework ?? null;
+  const fwConf = frameworkDetection?.confidence ?? 0;
+
+  // Helper: get framework-specific lazy-load API
+  const lazyLoadApi = (componentName: string): string => {
+    if (fw === "next.js" && fwConf > 0.5) return `next/dynamic(() => import('./${componentName}'), { ssr: false })`;
+    if ((fw === "react" || fw === "next.js") && fwConf > 0.3) return `React.lazy(() => import('./${componentName}')) with <Suspense>`;
+    if (fw === "vue" || fw === "nuxt") return `defineAsyncComponent(() => import('./${componentName}'))`;
+    if (fw === "angular") return `loadComponent: () => import('./${componentName}')`;
+    return `dynamic import() for ./${componentName}`;
+  };
 
   // ── Win 1: Eliminate render-blocking resources ─────────────────────────────
   if (bottlenecks?.renderBlockingResources.length) {
@@ -72,14 +85,15 @@ export function generateQuickWins(
     }
   }
 
-  // ── Win 4: Lazy-load chart libraries ──────────────────────────────────────
+  // ── Win 4: Lazy-load chart libraries (framework-aware) ───────────────────────
   if (bundle) {
     const chartDeps = bundle.largestDependencies.filter(
       (d) => d.category === "chart-library" && d.initial && d.sizeKB > 100
     );
     for (const dep of chartDeps.slice(0, 2)) {
+      const lazyCall = lazyLoadApi(dep.name);
       wins.push({
-        action: `Lazy-load ${dep.name} (${Math.round(dep.sizeKB)}KB) with dynamic import() — not needed on initial render`,
+        action: `Lazy-load ${dep.name} (${Math.round(dep.sizeKB)}KB) — use ${lazyCall}`,
         estimatedSavingsMs: Math.round(dep.sizeKB),
         priority: 0,
         category: "bundle",
@@ -115,7 +129,7 @@ export function generateQuickWins(
     });
   }
 
-  // ── Win 7: Defer heavy scripts from trace ─────────────────────────────────
+  // ── Win 7: Defer heavy scripts from trace (with script-specific names) ──────
   if (bottlenecks && !wins.some((w) => w.category === "javascript")) {
     const heavyScripts = bottlenecks.scriptingBottlenecks
       .filter((s) => s.totalExecutionMs > 200 && s.url && s.url !== "Unattributable")
@@ -125,13 +139,37 @@ export function generateQuickWins(
         const parts = s.url.split("/");
         return parts[parts.length - 1] ?? s.url;
       }).join(", ");
+      const totalMs = heavyScripts.reduce((s, x) => s + x.totalExecutionMs, 0);
       wins.push({
-        action: `Defer or async-load: ${names}`,
-        estimatedSavingsMs: Math.round(heavyScripts.reduce((s, x) => s + x.totalExecutionMs, 0) * 0.5),
+        action: `Defer or async-load: ${names} — ${Math.round(totalMs)}ms execution can be deferred after page interaction`,
+        estimatedSavingsMs: Math.round(totalMs * 0.5),
         priority: 0,
         category: "javascript",
       });
     }
+  }
+
+  // ── Win 8: Framework-specific hydration optimization ───────────────────────
+  if (fw && fwConf > 0.5 && bottlenecks?.hydration.detected && (bottlenecks.hydration.durationMs ?? 0) > 500) {
+    const delay = bottlenecks.hydration.durationMs!;
+    let hydrationAction = "";
+    if (fw === "next.js") {
+      hydrationAction = `Use Next.js React Server Components + Suspense to defer non-critical hydration. Target: reduce ${delay}ms interaction gap.`;
+    } else if (fw === "react") {
+      hydrationAction = `Use React.lazy() + startTransition() to defer non-critical component hydration. Target: reduce ${delay}ms post-FCP gap.`;
+    } else if (fw === "vue" || fw === "nuxt") {
+      hydrationAction = `Use Nuxt's lazy: true or defineAsyncComponent() to defer below-fold hydration. Target: reduce ${delay}ms gap.`;
+    } else if (fw === "astro") {
+      hydrationAction = `Use Astro's client:idle or client:visible hydration directives. Target: reduce ${delay}ms interaction gap.`;
+    } else {
+      hydrationAction = `Defer non-critical ${fw} component hydration using progressive enhancement patterns.`;
+    }
+    wins.push({
+      action: hydrationAction,
+      estimatedSavingsMs: Math.round(delay * 0.5),
+      priority: 0,
+      category: "javascript",
+    });
   }
 
   // Sort by estimated savings descending, assign priority ranks

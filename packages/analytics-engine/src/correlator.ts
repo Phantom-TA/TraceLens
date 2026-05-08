@@ -46,6 +46,22 @@ interface CorrelationContext {
 
 // ─── Helpers ───────────────────────────────────────────────────────────────────
 
+/** Known third-party CDN patterns (domains associated with heavy ad/analytics scripts) */
+const THIRD_PARTY_PATTERNS = [
+  "doubleclick.net", "googlesyndication.com", "googletagmanager.com", "googletagservices.com",
+  "facebook.net", "tinypass", "pubads", "amazon-adsystem", "scorecardresearch",
+  "moatads", "criteo", "taboola", "outbrain", "quantserve", "chartbeat",
+];
+
+function isThirdParty(url: string): boolean {
+  const lower = url.toLowerCase();
+  return THIRD_PARTY_PATTERNS.some((p) => lower.includes(p));
+}
+
+function extractDomain(url: string): string {
+  try { return new URL(url).hostname; } catch { return url; }
+}
+
 function risk(
   type: BottleneckType,
   label: string,
@@ -65,18 +81,17 @@ export function correlatePerformanceRisks(ctx: CorrelationContext): PerformanceR
   const { vitals, bottlenecks, bundle } = ctx;
   const b = bottlenecks;
 
-  // ── Rule 1: Heavy JavaScript ───────────────────────────────────────────────
+  // ── Rule 1: Heavy JavaScript ──────────────────────────────────────────────
   {
     const sources: string[] = [];
     let confidence = 0;
     const jsMs = b?.bundleSignals.jsBeforeFcpMs ?? 0;
 
     if (b?.correlations.primaryBottleneck === "heavy-javascript") {
-      sources.push("trace-parser");
-      confidence += 0.5;
+      sources.push("trace-parser"); confidence += 0.5;
     }
     if (b?.bundleSignals.largeInitialJS) {
-      sources.push("trace-parser");
+      if (!sources.includes("trace-parser")) sources.push("trace-parser");
       confidence += 0.2;
     }
     if (bundle?.performanceSignals.largeInitialJS) {
@@ -90,15 +105,50 @@ export function correlatePerformanceRisks(ctx: CorrelationContext): PerformanceR
 
     if (confidence > 0.3) {
       const severity: Severity = jsMs > 5000 ? "critical" : jsMs > 3000 ? "high" : jsMs > 1500 ? "medium" : "low";
-      risks.push(risk(
+
+      // Build specific script attribution string if we have attributed scripts from long tasks
+      const lcpTasks = b?.largestLongTasks.filter((t) => t.lcpOverlap && t.attributedScripts?.length > 0) ?? [];
+      const allAttributedScripts = b?.largestLongTasks
+        .flatMap((t) => t.attributedScripts ?? [])
+        .filter((s, i, arr) => arr.indexOf(s) === i) // dedupe
+        .slice(0, 3) ?? [];
+
+      let impactStr: string;
+      if (lcpTasks.length > 0 && lcpTasks[0]!.attributedScripts!.length > 0) {
+        const topScript = lcpTasks[0]!.attributedScripts![0]!;
+        const scriptName = topScript.split("/").pop() ?? topScript;
+        impactStr = `${scriptName} blocked main thread for ${lcpTasks[0]!.duration}ms during the LCP render window`;
+      } else if (allAttributedScripts.length > 0) {
+        const names = allAttributedScripts.map((s) => s.split("/").pop() ?? s).join(", ");
+        impactStr = `${Math.round(jsMs)}ms of JS before FCP. Primary scripts: ${names}`;
+      } else {
+        impactStr = `${Math.round(jsMs)}ms of JS executed before FCP, blocking rendering`;
+      }
+
+      // Heuristic impact estimate: each 1000ms of pre-FCP JS delays LCP by ~400ms
+      const lcpEstimate = jsMs > 0 ? Math.round((jsMs / 1000) * 400) : null;
+      const tbtEstimate = (vitals.tbt ?? 0) > 200 ? Math.round((vitals.tbt ?? 0) * 0.3) : null;
+
+      const riskItem = risk(
         "heavy-javascript",
         "Heavy JavaScript Execution",
         severity,
         Math.min(confidence, 0.98),
         sources,
-        `${Math.round(jsMs)}ms of JS executed before FCP, blocking rendering`,
+        impactStr,
         "Split large JS bundles with dynamic imports, defer non-critical scripts, move analytics loading after hydration"
-      ));
+      );
+      riskItem.attributionMetadata = {
+        attributedScripts: allAttributedScripts,
+        attributionConfidence: allAttributedScripts.length > 0 ? 1.0 : 0.5,
+      };
+      riskItem.impactEstimate = {
+        lcpMs: lcpEstimate,
+        tbtMs: tbtEstimate,
+        fcpMs: lcpEstimate ? Math.round(lcpEstimate * 0.7) : null,
+        scorePoints: lcpEstimate ? Math.round(lcpEstimate / 50) : null,
+      };
+      risks.push(riskItem);
     }
   }
 
@@ -108,15 +158,26 @@ export function correlatePerformanceRisks(ctx: CorrelationContext): PerformanceR
     if (rbr.length > 0 && b?.correlations.fcpBlockedByResources) {
       const totalBlockingMs = rbr.reduce((s, r) => s + (r.blockingMs ?? 0), 0);
       const severity: Severity = totalBlockingMs > 1000 ? "critical" : totalBlockingMs > 500 ? "high" : "medium";
-      risks.push(risk(
+      const topResource = rbr[0];
+      const specificImpact = topResource
+        ? `"${topResource.url}" blocks FCP by ~${topResource.blockingMs ?? "?"}ms (${rbr.length} total render-blocking resource(s))`
+        : `${rbr.length} render-blocking resource(s) delaying FCP by ~${Math.round(totalBlockingMs)}ms`;
+      const riskItem = risk(
         "render-blocking-resources",
         "Render-Blocking Resources",
         severity,
         0.9,
         ["trace-parser", "lighthouse"],
-        `${rbr.length} render-blocking resource(s) delaying FCP by ~${Math.round(totalBlockingMs)}ms`,
+        specificImpact,
         "Add defer/async to non-critical scripts, inline critical CSS, preload key resources"
-      ));
+      );
+      riskItem.impactEstimate = {
+        lcpMs: null,
+        tbtMs: null,
+        fcpMs: Math.round(totalBlockingMs * 0.7),
+        scorePoints: Math.round(totalBlockingMs * 0.7 / 50),
+      };
+      risks.push(riskItem);
     }
   }
 
@@ -137,27 +198,38 @@ export function correlatePerformanceRisks(ctx: CorrelationContext): PerformanceR
     }
   }
 
-  // ── Rule 4: Hydration Delay ────────────────────────────────────────────────
+  // ── Rule 4: Hydration Delay ─────────────────────────────────────────────
   {
     const hydration = b?.hydration;
     const jsBeforeFcp = b?.bundleSignals.jsBeforeFcpMs ?? 0;
     if (hydration?.detected && (hydration.durationMs ?? 0) > 500) {
       const delay = hydration.durationMs ?? 0;
       const severity: Severity = delay > 2000 ? "critical" : delay > 1000 ? "high" : "medium";
-      risks.push(risk(
+      // Incorporate confidence into the label
+      const confPct = hydration.confidence !== undefined ? Math.round(hydration.confidence * 100) : 85;
+      const fw = hydration.framework ?? "Framework";
+      const fwLabel = fw.charAt(0).toUpperCase() + fw.slice(1);
+      const confModifier = confPct >= 80 ? "" : ` (${confPct}% confidence)`;
+      const riskItem = risk(
         "hydration-delay",
-        "Hydration Delay",
+        `${fwLabel} Hydration Delay${confModifier}`,
         severity,
-        0.85,
+        Math.min((hydration.confidence ?? 0.85), 0.95),
         ["trace-parser"],
-        `${delay}ms gap from FCP to interactive — framework hydration blocking interaction`,
-        "Implement streaming SSR, partial hydration, or islands architecture to reduce hydration time"
-      ));
+        `${delay}ms gap from FCP to interactive — ${fwLabel} hydration blocking interaction`,
+        `Implement streaming SSR, partial hydration, or islands architecture. For ${fwLabel}: use server components or selective hydration.`
+      );
+      riskItem.impactEstimate = {
+        lcpMs: null,
+        tbtMs: Math.round(delay * 0.5),
+        fcpMs: null,
+        scorePoints: Math.round(delay * 0.5 / 50),
+      };
+      risks.push(riskItem);
     } else if (!hydration?.detected && jsBeforeFcp > 2000 && b?.bundleSignals.heavyEarlyScripts) {
-      // Infer hydration risk from heavy early JS even without direct detection
       risks.push(risk(
         "hydration-delay",
-        "Likely Hydration Delay (Inferred)",
+        "Likely Hydration Delay (Inferred, 60% confidence)",
         "medium",
         0.6,
         ["trace-parser"],
@@ -274,6 +346,73 @@ export function correlatePerformanceRisks(ctx: CorrelationContext): PerformanceR
         `CLS score is ${cls} — layout shifts degrading user experience`,
         "Reserve space for dynamic content (images, ads, embeds), avoid inserting content above existing DOM"
       ));
+    }
+  }
+
+  // ── Rule 11: Third-Party Script TBT Impact ───────────────────────────────
+  {
+    const longTasks = b?.largestLongTasks ?? [];
+    const thirdPartyTasks = longTasks.filter((t) =>
+      (t.attributedScripts ?? []).some((s) => isThirdParty(s))
+    );
+    if (thirdPartyTasks.length > 0 && (vitals.tbt ?? 0) > 150) {
+      const totalMs = thirdPartyTasks.reduce((s, t) => s + t.duration, 0);
+      const origins = [...new Set(
+        thirdPartyTasks
+          .flatMap((t) => (t.attributedScripts ?? []).filter(isThirdParty))
+          .map(extractDomain)
+      )].slice(0, 3);
+      const severity: Severity = totalMs > 800 ? "high" : totalMs > 300 ? "medium" : "low";
+      const riskItem = risk(
+        "heavy-javascript",
+        "Third-Party Scripts Impacting TBT",
+        severity,
+        0.82,
+        ["trace-parser", "lighthouse"],
+        `Third-party scripts (${origins.join(", ")}) contributed ${Math.round(totalMs)}ms to main thread blocking`,
+        `Lazy-load or defer these third-party scripts: ${origins.join(", ")}. Use Partytown or web workers for analytics.`
+      );
+      riskItem.attributionMetadata = {
+        attributedScripts: thirdPartyTasks.flatMap((t) => t.attributedScripts ?? []).filter(isThirdParty).slice(0, 5),
+        attributionConfidence: 0.90,
+        thirdPartyOrigins: origins,
+      };
+      riskItem.impactEstimate = {
+        lcpMs: null,
+        tbtMs: Math.round(totalMs * 0.6),
+        fcpMs: null,
+        scorePoints: Math.round(totalMs * 0.6 / 50),
+      };
+      // Only add if not already covered by Rule 1's heavy-javascript
+      if (!risks.some((r) => r.type === "heavy-javascript" && r.label === "Heavy JavaScript Execution")) {
+        risks.push(riskItem);
+      }
+    }
+  }
+
+  // ── Rule 12: Large LCP Image ─────────────────────────────────────────────
+  {
+    const lcpCand = b?.lcpCandidate;
+    if (lcpCand?.resourceUrl && (lcpCand.sizeKB ?? 0) > 100 && (vitals.lcp ?? 0) > 2500) {
+      const kb = lcpCand.sizeKB!;
+      const severity: Severity = kb > 500 ? "critical" : kb > 250 ? "high" : "medium";
+      const imgName = lcpCand.resourceUrl.split("/").pop()?.split("?")[0] ?? lcpCand.resourceUrl;
+      const riskItem = risk(
+        "unoptimized-images",
+        "LCP Image Not Optimized",
+        severity,
+        0.93,
+        ["trace-parser", "lighthouse"],
+        `LCP image "${imgName}" is ${Math.round(kb)}KB — delays LCP by slowing resource load`,
+        `Compress "${imgName}" to WebP/AVIF, add width/height attributes, use <link rel="preload"> for LCP images`
+      );
+      riskItem.impactEstimate = {
+        lcpMs: Math.round((kb - 50) * 3), // rough: ~3ms per KB saved
+        tbtMs: null,
+        fcpMs: null,
+        scorePoints: Math.round((kb - 50) * 3 / 50),
+      };
+      risks.push(riskItem);
     }
   }
 

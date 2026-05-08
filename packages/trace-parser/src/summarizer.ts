@@ -16,6 +16,7 @@
 import type {
   BundleSignals,
   CorrelationInsights,
+  FrameworkDetectionResult,
   HydrationSignal,
   LCPCandidate,
   LongTask,
@@ -42,13 +43,14 @@ export function buildAISignals(params: {
   rendering: RenderingTimeline;
   bundle: BundleSignals;
   correlations: CorrelationInsights;
+  frameworkDetection?: FrameworkDetectionResult;
 }): string[] {
   const signals: string[] = [];
 
   const {
     vitals, mainThread, longTasks, lcpCandidate,
     renderBlockers, hydration, scripting, rendering,
-    bundle, correlations,
+    bundle, correlations, frameworkDetection,
   } = params;
 
   // ── Primary diagnosis first ────────────────────────────────────────────────
@@ -82,13 +84,25 @@ export function buildAISignals(params: {
     signals.push(`Longest single task: ${mainThread.longestTaskMs}ms.`);
   }
 
-  // ── Long Tasks ─────────────────────────────────────────────────────────────
+  // ── Long Tasks (with script attribution) ───────────────────────────────────
   if (longTasks.length > 0) {
     const top = longTasks[0]!;
+    // Use multi-attribution if available, otherwise primary script
+    const scriptPart = top.attributedScripts?.length > 0
+      ? top.attributedScripts.slice(0, 2).map((s) => `"${s}"`).join(" + ")
+      : top.script ? `"${top.script}"` : null;
+    const lcpNote = top.lcpOverlap ? " (during LCP render window)" : "";
+    const confNote = top.attributionConfidence !== undefined && top.attributionConfidence < 1.0
+      ? " [inferred attribution]"
+      : "";
     signals.push(
       `Worst long task: ${top.duration}ms of ${top.attribution}` +
-      (top.script ? ` in "${top.script}"` : "") + ` at t=${top.startTime}ms.`
+      (scriptPart ? ` in ${scriptPart}` : "") + lcpNote + confNote + ` at t=${top.startTime}ms.`
     );
+    // Emit LCP-blocking signal separately if overlap detected
+    if (top.lcpOverlap && scriptPart) {
+      signals.push(`${scriptPart} blocked main thread during LCP render window for ${top.duration}ms.`);
+    }
   }
 
   // ── LCP ───────────────────────────────────────────────────────────────────
@@ -114,13 +128,25 @@ export function buildAISignals(params: {
     );
   }
 
-  // ── Hydration ─────────────────────────────────────────────────────────────
+  // ── Hydration (with confidence) ─────────────────────────────────────────
   if (hydration.detected) {
-    const fw = hydration.framework ?? "unknown framework";
+    const fw = hydration.framework ? hydration.framework.charAt(0).toUpperCase() + hydration.framework.slice(1) : "Unknown framework";
+    const pct = hydration.confidence !== undefined ? ` (${Math.round(hydration.confidence * 100)}% confidence)` : "";
+    const method = hydration.detectionMethod !== undefined ? ` via ${hydration.detectionMethod}` : "";
     signals.push(
-      `${fw} hydration detected: ${hydration.durationMs}ms` +
-      (hydration.fcpToHydrationMs !== null ? `, ${hydration.fcpToHydrationMs}ms after FCP` : "") + `.`
+      `${fw} hydration detected${pct}${method}: ${hydration.durationMs}ms` +
+      (hydration.fcpToHydrationMs !== null ? `, ${hydration.fcpToHydrationMs}ms post-FCP interaction gap` : "") + `.`
     );
+  } else if (bundle.jsBeforeFcpMs > 2000) {
+    signals.push(`No hydration marks detected — inferred from ${bundle.jsBeforeFcpMs}ms JS before FCP (possible SSR/CSR framework initialization).`);
+  }
+
+  // ── Framework Detection ──────────────────────────────────────────────
+  if (frameworkDetection?.framework && frameworkDetection.framework !== null) {
+    const fw = frameworkDetection.framework.charAt(0).toUpperCase() + frameworkDetection.framework.slice(1);
+    const pct = Math.round(frameworkDetection.confidence * 100);
+    const methods = frameworkDetection.detectionMethods.join(", ");
+    signals.push(`Framework detected: ${fw} (${pct}% confidence) via ${methods}.`);
   }
 
   // ── Scripting ─────────────────────────────────────────────────────────────

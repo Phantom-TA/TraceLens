@@ -53,6 +53,8 @@ export interface NormalizedCoreWebVitals {
 export interface NormalizedLongTask {
   /** Script URL (cleaned, shortened) */
   script: string | null;
+  /** All attributed script URLs for this task */
+  attributedScripts?: string[];
   /** Task duration (ms) */
   durationMs: number;
   /** Task start time relative to navigation (ms) */
@@ -61,6 +63,8 @@ export interface NormalizedLongTask {
   attribution: string;
   /** Computed severity based on duration */
   severity: Severity;
+  /** Whether this task overlapped with LCP render window */
+  lcpOverlap?: boolean;
 }
 
 export interface NormalizedMainThread {
@@ -138,6 +142,12 @@ export interface NormalizedHydration {
   jsBeforeFcpMs: number;
   /** Severity of hydration risk */
   severity: Severity;
+  /** Confidence score 0–1 (from trace-parser probabilistic detection) */
+  confidence: number;
+  /** How hydration was detected */
+  detectionMethod: string | null;
+  /** Human-readable confidence note */
+  confidenceNote: string | null;
 }
 
 // ─── Bundle Intelligence ───────────────────────────────────────────────────────
@@ -199,6 +209,19 @@ export interface PerformanceRisk {
   recommendation: string;
   /** Priority rank (1 = highest priority) */
   priority: number;
+  /** Attribution metadata: which scripts caused this bottleneck */
+  attributionMetadata?: {
+    attributedScripts: string[];
+    attributionConfidence: number;
+    thirdPartyOrigins?: string[];
+  };
+  /** Heuristic-based estimated gain from fixing this */
+  impactEstimate?: {
+    lcpMs: number | null;
+    tbtMs: number | null;
+    fcpMs: number | null;
+    scorePoints: number | null;
+  };
 }
 
 // ─── Quick Wins ────────────────────────────────────────────────────────────────
@@ -241,7 +264,32 @@ export interface SessionContext {
   pipelineDurationMs: number;
 }
 
-// ─── Aggregation Metadata ──────────────────────────────────────────────────────
+// ─── Stability Metrics ──────────────────────────────────────────────────────
+
+/** Multi-run stability and variance tracking */
+export interface StabilityMetrics {
+  /** Number of audit runs that contributed to this report */
+  runs: number;
+  /** Coefficient of variation (%) per metric — lower is more stable */
+  variance: {
+    lcp: number | null;
+    fcp: number | null;
+    tbt: number | null;
+    cls: number | null;
+  };
+  /** Averaged metrics across all runs */
+  averaged: {
+    lcp: number | null;
+    fcp: number | null;
+    tbt: number | null;
+  };
+  /** Overall stability confidence */
+  stabilityConfidence: "high" | "medium" | "low";
+  /** Human-readable stability note */
+  stabilityNote: string | null;
+}
+
+// ─── Aggregation Metadata ────────────────────────────────────────────────────
 
 export interface AggregationMeta {
   /** When this intelligence report was generated */
@@ -285,8 +333,15 @@ export interface TraceLensIntelligenceReport {
   /** LCP candidate details */
   lcpCandidate: NormalizedLCPCandidate | null;
 
-  /** Hydration and JS initialization analysis */
+  /** Hydration and JS initialization analysis with confidence scoring */
   hydration: NormalizedHydration;
+
+  /**
+   * Framework detection result.
+   * Primary: trace runtime signals. Secondary: LHR script signatures.
+   * null if no framework detected.
+   */
+  framework: import("../../trace-parser/src/types.js").FrameworkDetectionResult | null;
 
   /**
    * Bundle intelligence (null if bundle analysis was not run).
@@ -319,6 +374,12 @@ export interface TraceLensIntelligenceReport {
 
   /** Data availability and confidence */
   dataQuality: DataQualityReport;
+
+  /**
+   * Multi-run stability metrics (null for single-run audits).
+   * Available when pipeline runs with runs > 1.
+   */
+  stabilityMetrics: StabilityMetrics | null;
 }
 
 // ─── Input Type ────────────────────────────────────────────────────────────────
