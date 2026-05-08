@@ -7,7 +7,7 @@ import { run } from './packages/lighthouse-runner/src/index.js';
 async function main() {
   const result = await run({
     routes: [
-      { url: 'https://example.com' }
+      { url: 'https://www.cnn.com' }
     ],
     preset: 'desktop',
     formats: ['json', 'html'],

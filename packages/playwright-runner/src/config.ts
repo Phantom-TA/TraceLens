@@ -12,7 +12,7 @@ import type {
   ResolvedRunnerConfig,
   RunnerConfig,
   ViewportConfig,
-} from "./types";
+} from "./types.js";
 
 // ─── Device Profile Registry ───────────────────────────────────────────────────
 

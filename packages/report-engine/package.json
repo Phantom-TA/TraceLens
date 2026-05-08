@@ -1,0 +1,17 @@
+{
+  "name": "@tracelens/report-engine",
+  "version": "1.0.0",
+  "description": "TraceLens Pipeline Engine — unified performance intelligence orchestrator",
+  "type": "module",
+  "main": "src/index.ts",
+  "scripts": {
+    "typecheck": "tsc --noEmit --project tsconfig.json"
+  },
+  "keywords": ["pipeline", "orchestrator", "tracelens", "performance"],
+  "author": "",
+  "license": "ISC",
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "typescript": "^5.0.0"
+  }
+}

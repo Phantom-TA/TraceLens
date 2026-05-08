@@ -16,13 +16,13 @@ import {
   chromium,
   Page,
 } from "playwright";
-import { DEVICE_PROFILES, THROTTLE_CONDITIONS, resolveDeviceProfile } from "./config";
+import { DEVICE_PROFILES, THROTTLE_CONDITIONS, resolveDeviceProfile } from "./config.js";
 import type {
   DeviceProfile,
   ResolvedRunnerConfig,
   ThrottleProfile,
   ViewportConfig,
-} from "./types";
+} from "./types.js";
 
 // ─── Browser Launch ────────────────────────────────────────────────────────────
 

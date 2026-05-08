@@ -14,7 +14,7 @@
  */
 
 import { BrowserContext } from "playwright";
-import type { ResolvedRunnerConfig } from "./types";
+import type { ResolvedRunnerConfig } from "./types.js";
 
 // ─── Types ─────────────────────────────────────────────────────────────────────
 
