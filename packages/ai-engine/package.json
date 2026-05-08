@@ -1,0 +1,17 @@
+{
+  "name": "@tracelens/ai-engine",
+  "version": "1.0.0",
+  "description": "TraceLens AI Root-Cause Analysis Engine — BYOK, multi-provider, structured reasoning",
+  "type": "module",
+  "main": "src/index.ts",
+  "scripts": {
+    "typecheck": "tsc --noEmit --project tsconfig.json"
+  },
+  "keywords": ["ai", "performance", "root-cause", "tracelens"],
+  "author": "",
+  "license": "ISC",
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "typescript": "^5.0.0"
+  }
+}
