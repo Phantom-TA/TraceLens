@@ -23,11 +23,13 @@ import { join } from "path";
 import { runPipeline } from "../../../packages/pipeline-engine/src/pipeline.js";
 import { aggregate } from "../../../packages/analytics-engine/src/index.js";
 import { analyzeWithAI } from "../../../packages/ai-engine/src/index.js";
+import { writeReports, writeComparisonReport } from "../../../packages/report-engine/src/exporters/file-writer.js";
 
 import type { PipelineConfig, TraceLensResult, RouteIntelligenceResult } from "../../../packages/pipeline-engine/src/types.js";
 import type { AggregatorInput, TraceLensIntelligenceReport } from "../../../packages/analytics-engine/src/index.js";
 import type { AIRootCauseReport } from "../../../packages/ai-engine/src/index.js";
 import type { TraceLensConfig, AuditSummary, ComparisonResult, VitalComparison, SessionMetadata } from "../types/index.js";
+import type { ReportInput, ReportOutput } from "../../../packages/report-engine/src/types.js";
 
 import { log } from "../utils/logger.js";
 import { ensureDir, getAIReportPath, getAIMarkdownPath } from "../utils/paths.js";
@@ -164,6 +166,69 @@ export function saveAuditReports(
   }
 
   return { jsonPath, markdownPath };
+}
+
+// ─── Report Generation ────────────────────────────────────────────────────────
+
+/**
+ * Generate HTML + Markdown reports using the report-engine.
+ * This is the primary visual output layer — called after analytics + AI stages.
+ */
+export function generateReports(
+  outputDir: string,
+  sessionId: string,
+  intelligenceReport: TraceLensIntelligenceReport,
+  aiResult: { status: string; report: AIRootCauseReport | null; meta: Record<string, unknown> } | null,
+  artifacts?: Record<string, string | null> | null,
+  formats: Array<"html" | "markdown" | "json" | "all"> = ["html", "markdown"]
+): ReportOutput {
+  const input: ReportInput = {
+    intelligenceReport,
+    aiResult: aiResult ? {
+      status: aiResult.status as "success" | "skipped" | "failed",
+      report: aiResult.report,
+      meta: aiResult.meta as any,
+    } : null,
+    artifacts: artifacts ?? null,
+  };
+  return writeReports(input, { outputDir: `${outputDir}/intelligence`, formats, sessionId });
+}
+
+/**
+ * Generate a before/after comparison HTML report using the report-engine.
+ */
+export function generateComparisonReport(
+  outputDir: string,
+  beforeInput: ReportInput,
+  afterInput: ReportInput,
+  labels?: { before?: string; after?: string }
+): ReportOutput {
+  return writeComparisonReport(
+    { before: beforeInput, after: afterInput, beforeLabel: labels?.before, afterLabel: labels?.after },
+    { outputDir: `${outputDir}/intelligence` }
+  );
+}
+
+/**
+ * Load a canonical intelligence JSON bundle from disk.
+ * Supports both: raw intelligence report OR saved bundle {intelligenceReport, aiResult}.
+ */
+export function loadIntelligenceBundle(reportPath: string): ReportInput {
+  let raw: Record<string, unknown>;
+  try {
+    raw = JSON.parse(readFileSync(reportPath, "utf-8")) as Record<string, unknown>;
+  } catch (err) {
+    throw new Error(`Cannot read report: ${reportPath} — ${err instanceof Error ? err.message : String(err)}`);
+  }
+  const intelligenceReport = (raw.intelligenceReport ?? raw) as TraceLensIntelligenceReport;
+  if (!intelligenceReport?.session?.url) {
+    throw new Error(`File does not look like a TraceLens intelligence report: ${reportPath}`);
+  }
+  return {
+    intelligenceReport,
+    aiResult: (raw.aiResult as any) ?? null,
+    artifacts: null,
+  };
 }
 
 // ─── Summary Builder ──────────────────────────────────────────────────────────

@@ -1,0 +1,20 @@
+{
+  "name": "@tracelens/report-engine",
+  "version": "1.0.0",
+  "description": "TraceLens Report Engine — pure rendering, visualization, and artifact generation",
+  "type": "module",
+  "main": "src/index.ts",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit --project tsconfig.json"
+  },
+  "keywords": ["report", "renderer", "html", "visualization", "tracelens", "performance"],
+  "author": "",
+  "license": "ISC",
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "typescript": "^5.0.0"
+  }
+}
