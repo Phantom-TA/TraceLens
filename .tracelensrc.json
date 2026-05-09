@@ -1,0 +1,15 @@
+{
+  "routes": [
+    "/"
+  ],
+  "device": "desktop",
+  "throttle": "none",
+  "runs": 1,
+  "ai": true,
+  "outputDir": "./reports",
+  "bundle": {
+    "_comment": "Optional: set webpackStatsPath to enable bundle analysis",
+    "webpackStatsPath": null,
+    "framework": null
+  }
+}
