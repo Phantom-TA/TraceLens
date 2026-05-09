@@ -1,4 +1,4 @@
-import { run } from './packages/playwright-runner/src';
+import { run } from './packages/playwright-runner/src/index.js';
 
 async function main() {
   await run({

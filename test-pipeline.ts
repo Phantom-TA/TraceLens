@@ -12,7 +12,7 @@
  *   node dist-test-pipeline/test-pipeline.js
  */
 
-import { runPipeline } from "./packages/report-engine/src/index.js";
+import { runPipeline } from "./packages/pipeline-engine/src/index.js";
 
 async function main() {
   const result = await runPipeline({
@@ -43,9 +43,9 @@ async function main() {
 
   console.log("\n  Stage Execution:");
   for (const [name, stage] of Object.entries(result.stages)) {
-    const icon = stage.status === "done" ? "✓" : stage.status === "skipped" ? "⊘" : stage.status === "failed" ? "✗" : "?";
-    const dur  = stage.durationMs !== null ? `${stage.durationMs}ms` : "";
-    console.log(`    ${icon} ${name.padEnd(16)} ${stage.status.padEnd(8)} ${dur}`);
+    const icon = (stage as any).status === "done" ? "✓" : (stage as any).status === "skipped" ? "⊘" : (stage as any).status === "failed" ? "✗" : "?";
+    const dur  = (stage as any).durationMs !== null ? `${(stage as any).durationMs}ms` : "";
+    console.log(`    ${icon} ${name.padEnd(16)} ${(stage as any).status.padEnd(8)} ${dur}`);
   }
 
   for (const route of result.routes) {
@@ -61,7 +61,7 @@ async function main() {
 
     if (route.aiSignals.length > 0) {
       console.log("\n    Top AI Signals:");
-      route.aiSignals.slice(0, 5).forEach((s, i) => console.log(`      ${i + 1}. ${s}`));
+      route.aiSignals.slice(0, 5).forEach((s: string, i: number) => console.log(`      ${i + 1}. ${s}`));
     }
 
     console.log("\n    Artifacts:");
