@@ -45,6 +45,7 @@ import {
   saveAuditReports,
   saveSessionMetadata,
   buildAuditSummary,
+  generateReports,
 } from "../services/orchestrator.js";
 
 import type { AuditOptions, TraceLensConfig } from "../types/index.js";
@@ -225,7 +226,7 @@ async function runAudit(url: string, options: AuditOptions): Promise<void> {
       }
     }
 
-    // ── Save reports ─────────────────────────────────────────────────────────
+    // ── Save reports (JSON + Markdown) ───────────────────────────────────────
     const { jsonPath, markdownPath } = saveAuditReports(
       resolveOutputDir(config.outputDir),
       pipelineResult.sessionId,
@@ -234,6 +235,35 @@ async function runAudit(url: string, options: AuditOptions): Promise<void> {
     );
     allSavedPaths.push(jsonPath);
     if (markdownPath) allSavedPaths.push(markdownPath);
+
+    // ── Generate TraceLens HTML report via report-engine ─────────────────────
+    const routeArtifacts = pipelineResult.routes[0]?.artifacts ?? null;
+    try {
+      const reportOutput = generateReports(
+        resolveOutputDir(config.outputDir),
+        pipelineResult.sessionId,
+        intel,
+        aiResult,
+        routeArtifacts ? {
+          screenshotPath:      routeArtifacts.screenshotPath,
+          tracePath:           routeArtifacts.tracePath,
+          harPath:             routeArtifacts.harPath,
+          lighthouseJsonPath:  routeArtifacts.lighthouseJsonPath,
+          lighthouseHtmlPath:  routeArtifacts.lighthouseHtmlPath,
+          bottlenecksJsonPath: routeArtifacts.bottlenecksJsonPath,
+          bundleJsonPath:      routeArtifacts.bundleJsonPath,
+        } : null,
+        ["html", "markdown"]
+      );
+      if (reportOutput.htmlPath) {
+        allSavedPaths.push(reportOutput.htmlPath);
+        // Track as the primary report path for --open
+        (pipelineResult as any)._traceLensHtmlPath = reportOutput.htmlPath;
+      }
+      if (reportOutput.markdownPath) allSavedPaths.push(reportOutput.markdownPath);
+    } catch (err) {
+      log.warn(`Report generation warning: ${err instanceof Error ? err.message : String(err)}`);
+    }
   }
 
   // ── Save session metadata (--save-session) ─────────────────────────────────
@@ -374,11 +404,13 @@ async function runAudit(url: string, options: AuditOptions): Promise<void> {
   log.success(`Audit complete in ${(totalMs / 1000).toFixed(1)}s`);
   log.blank();
 
-  // ── Open in browser ────────────────────────────────────────────────────────
+  // ── Open in browser ────────────────────────────────────────────────────────────────
   if (options.open) {
-    const htmlPath = pipelineResult.routes[0]?.artifacts?.lighthouseHtmlPath;
+    // Prefer TraceLens HTML report; fall back to Lighthouse HTML
+    const traceLensHtml = (pipelineResult as any)._traceLensHtmlPath as string | undefined;
+    const htmlPath = traceLensHtml ?? pipelineResult.routes[0]?.artifacts?.lighthouseHtmlPath;
     if (htmlPath) {
-      log.info("Opening Lighthouse report in browser…");
+      log.info("Opening TraceLens report in browser…");
       const { default: open } = await import("open");
       await open(htmlPath);
     } else {

@@ -73,6 +73,16 @@ export interface AnalyzeOptions {
   provider?: string; // Override AI provider
 }
 
+/** Options accepted by `tracelens report` */
+export interface ReportCommandOptions {
+  output: string;
+  open: boolean;
+  format: string; // "html" | "markdown" | "json" | "all"
+  title?: string;
+  beforeLabel?: string;
+  afterLabel?: string;
+}
+
 // ─── Audit Result (compact CLI view) ──────────────────────────────────────────
 
 /** Flattened vitals summary for CLI display */

@@ -23,6 +23,7 @@ import { createAuditCommand }   from "./commands/audit.js";
 import { createCompareCommand } from "./commands/compare.js";
 import { createAnalyzeCommand } from "./commands/analyze.js";
 import { createDoctorCommand }  from "./commands/doctor.js";
+import { createReportCommand }  from "./commands/report.js";
 
 // ─── Version resolution ───────────────────────────────────────────────────────
 
@@ -70,6 +71,10 @@ Examples:
   $ tracelens compare baseline.json current.json
   $ tracelens compare baseline.json current.json --json --fail-on-regression
   $ tracelens analyze reports/intelligence/ai-report-session.json
+  $ tracelens report reports/intelligence/ai-report-session.json
+  $ tracelens report reports/intelligence/ai-report-session.json --open
+  $ tracelens report reports/intelligence/ai-report-session.json --format all
+  $ tracelens report before.json --compare after.json --open
   $ tracelens doctor
   `)
   .version(buildVersionString(), "-V, --version", "Print TraceLens version info")
@@ -82,6 +87,7 @@ program.addCommand(createAuditCommand());
 program.addCommand(createCompareCommand());
 program.addCommand(createAnalyzeCommand());
 program.addCommand(createDoctorCommand());
+program.addCommand(createReportCommand());
 
 // ─── Global error handling ────────────────────────────────────────────────────
 
