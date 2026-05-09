@@ -12,6 +12,7 @@
     "tracelens:compare": "npx tsx cli/src/index.ts compare",
     "tracelens:analyze": "npx tsx cli/src/index.ts analyze",
     "tracelens:doctor": "npx tsx cli/src/index.ts doctor",
+    "tracelens:report": "npx tsx cli/src/index.ts report",
     "cli:build": "cd cli && npm run build",
     "cli:typecheck": "cd cli && npm run typecheck"
   },

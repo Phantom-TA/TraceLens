@@ -1,13 +1,26 @@
 /**
  * Smoke test for @tracelens/lighthouse-runner
- * Run with: npx tsx test-lighthouse.ts
+ *
+ * TARGET URL:
+ *   Set TRACELENS_TEST_URL in your .env file — no need to edit this file.
+ *   Default: http://localhost:3000
+ *
+ * Run:
+ *   npx tsx test-lighthouse.ts
  */
+
+import "dotenv/config";
 import { run } from './packages/lighthouse-runner/src/index.js';
+
+const TEST_URL = process.env["TRACELENS_TEST_URL"] ?? "http://localhost:3000";
+
+console.log(`\n  Target URL : ${TEST_URL}`);
+console.log(`  (Change this in .env → TRACELENS_TEST_URL)\n`);
 
 async function main() {
   const result = await run({
     routes: [
-      { url: 'https://www.cnn.com' }
+      { url: TEST_URL }
     ],
     preset: 'desktop',
     formats: ['json', 'html'],

@@ -4,20 +4,27 @@
  * This is the FIRST test that exercises the full pipeline:
  *   Playwright → Lighthouse → TraceParser → Aggregation
  *
- * Uses CNN as the test target since we've already verified it's slow
- * and produces meaningful bottleneck data.
+ * TARGET URL:
+ *   Set TRACELENS_TEST_URL in your .env file — no need to edit this file.
+ *   Default: http://localhost:3000
  *
  * Run:
- *   npx tsc --project tsconfig.pipeline-test.json
- *   node dist-test-pipeline/test-pipeline.js
+ *   npx tsx test-pipeline.ts
  */
 
+import "dotenv/config";
 import { runPipeline } from "./packages/pipeline-engine/src/index.js";
+
+const TEST_URL = process.env["TRACELENS_TEST_URL"] ?? "http://localhost:3000";
+const TEST_LABEL = TEST_URL.replace(/https?:\/\//, "").replace(/[^a-z0-9]/gi, "-").replace(/-+/g, "-").slice(0, 40);
+
+console.log(`\n  Target URL : ${TEST_URL}`);
+console.log(`  (Change this in .env → TRACELENS_TEST_URL)\n`);
 
 async function main() {
   const result = await runPipeline({
     routes: [
-      { url: "https://www.cnn.com", label: "cnn-homepage" },
+      { url: TEST_URL, label: TEST_LABEL },
     ],
     device: {
       mode: "desktop",
@@ -28,7 +35,7 @@ async function main() {
     capturePlaywrightArtifacts: true,
     runLighthouse: true,
     runTraceParser: true,
-    runBundleAnalyzer: false, // No webpack stats for CNN — skip bundle stage
+    runBundleAnalyzer: false,
     continueOnFailure: true,
     headless: true,
   });
@@ -66,10 +73,10 @@ async function main() {
 
     console.log("\n    Artifacts:");
     const a = route.artifacts;
-    if (a.screenshotPath) console.log(`      screenshot   : ${a.screenshotPath}`);
-    if (a.harPath)        console.log(`      HAR          : ${a.harPath}`);
+    if (a.screenshotPath)     console.log(`      screenshot   : ${a.screenshotPath}`);
+    if (a.harPath)            console.log(`      HAR          : ${a.harPath}`);
     if (a.lighthouseJsonPath) console.log(`      LHR JSON     : ${a.lighthouseJsonPath}`);
-    if (a.bottlenecksJsonPath) console.log(`      bottlenecks  : ${a.bottlenecksJsonPath}`);
+    if (a.bottlenecksJsonPath)console.log(`      bottlenecks  : ${a.bottlenecksJsonPath}`);
   }
 
   console.log("\n══════════════════════════════════════════════════════════\n");
