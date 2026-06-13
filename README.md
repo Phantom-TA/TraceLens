@@ -1,7 +1,7 @@
 # ⚡ TraceLens
 
 > **AI-powered frontend performance intelligence platform.**  
-> Audit any URL — localhost or live — get Core Web Vitals, bottleneck analysis, AI root-cause reasoning, and beautiful HTML reports.
+> Audit any URL —localhost or live — get Core Web Vitals, bottleneck analysis, AI root-cause reasoning, and beautiful HTML reports.
 
 ---
 
